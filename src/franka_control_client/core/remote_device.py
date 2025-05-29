@@ -31,26 +31,3 @@ class RemoteDevice(ABC):
             device_id: Optional device identifier
         """
         pass
-
-    @abstractmethod
-    async def connect(self) -> bool:
-        """
-        Connect to the remote device.
-
-        Returns:
-            True if connection successful, False otherwise
-
-        Raises:
-            ConnectionError: If connection fails after all retry attempts
-        """
-        pass
-
-    @abstractmethod
-    async def disconnect(self) -> bool:
-        """
-        Disconnect from the remote device.
-
-        Returns:
-            True if disconnection successful, False otherwise
-        """
-        pass
