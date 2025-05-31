@@ -53,7 +53,7 @@ class ControlMode(IntEnum):
     HUMAN_MODE = 4
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class FrankaArmState:
     """The robot state."""
 
