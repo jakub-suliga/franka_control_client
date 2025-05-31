@@ -10,7 +10,7 @@ jobs:
 
     strategy:
       matrix:
-        python-version: [3.13]
+        python-version: ['3.9','3.10','3.11','3.12','3.13']
 
     steps:
       - name: Checkout repository
@@ -27,6 +27,9 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
+      - name: Install project in editable mode
+        run: |
+          pip install -e .
 
       - name: Run pytest
         run: |
