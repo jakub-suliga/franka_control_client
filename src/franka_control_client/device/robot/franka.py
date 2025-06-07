@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+# Remove IntEnum import if not used by other enums, otherwise keep.
+# For now, I'll assume ControlMode still needs it.
 from enum import IntEnum
 from typing import Deque, Final, List, Optional, Tuple
 import socket
+
+from ...core.message import MsgID # Add this import
 import struct
 import threading
 import time
@@ -12,7 +16,7 @@ import time
 import zmq
 
 from ...core.remote_device import RemoteDevice
-from ...core.exception import CommandError
+from ...core.exception import CommandError, DeviceNotReadyError
 
 
 _HEADER_STRUCT: Final = struct.Struct("!BHx")  # uint8 id | uint16 len | pad
@@ -25,22 +29,6 @@ _STATE_STRUCT: Final = struct.Struct(
     "6d6d"  # O_F_ext_hat_K, K_F_ext_hat_K               –  96 B
 )
 _STATE_SIZE: Final = _STATE_STRUCT.size
-
-
-class MsgID(IntEnum):
-    """Message identifiers"""
-
-    GET_STATE_REQ = 0x01
-    QUERY_STATE_REQ = 0x02
-    START_CONTROL_REQ = 0x03
-    GET_SUB_PORT_REQ = 0x04
-
-    GET_STATE_RESP = 0x51
-    QUERY_STATE_RESP = 0x52
-    START_CONTROL_RESP = 0x53
-    GET_SUB_PORT_RESP = 0x54
-
-    ERROR = 0xFF
 
 
 class ControlMode(IntEnum):
@@ -74,54 +62,138 @@ class FrankaArmState:
 
 class RemoteFranka(RemoteDevice):
     """
-    RemoteFranka class for controlling a Franka robot.
+    RemoteFranka class for controlling a Franka Emika robot arm.
 
-    This class extends the RemoteDevice class and provides
-    specific functionality for interacting with a Franka robot.
+    This class implements the `RemoteDevice` interface to provide specific
+    functionality for interacting with a Franka robot via a ZMQ-based
+    server. It handles sending commands and receiving state updates.
+
+    The typical lifecycle is:
+    1. Initialize `RemoteFranka(device_addr, device_port)`.
+    2. Call `connect()` to establish the connection to the server.
+    3. Interact with the robot using methods like `get_state()`, `start_control()`, etc.
+    4. Call `disconnect()` to close the connection and clean up resources.
+
     Attributes:
-        device_addr (str): Address of the Franka robot.
-        device_port (int): Port for communication with the Franka robot.
+        device_addr (str): IP address of the Franka robot control server.
+        device_port (int): Port number for the Franka robot control server.
+        _ctx (zmq.Context): ZMQ context for managing sockets.
+        _sock_req (Optional[zmq.Socket]): ZMQ REQ socket for request-reply communication.
+        _state_buffer (Deque[FrankaArmState]): Buffer for storing received robot states.
+        _sub_sock (Optional[zmq.Socket]): ZMQ SUB socket for subscribing to state updates.
+        _sub_thread (Optional[threading.Thread]): Thread for listening to state updates.
+        _listen_flag (threading.Event): Event to control the state listener thread.
     """
 
     def __init__(self, device_addr: str, device_port: int) -> None:
         """
-        Initialize the RemoteFranka instance.
+        Initializes the RemoteFranka instance but does not connect.
 
         Args:
-            device_addr (str): Address of the Franka robot.
-            device_port (int): Port for communication with the Franka robot.
+            device_addr: The IP address of the Franka robot control server.
+            device_port: The port number for the Franka robot control server.
         """
         super().__init__(device_addr, device_port)
-        self._device_addr: str = device_addr
+        # self.device_addr and self.device_port are available from superclass
         self._ctx: zmq.Context = zmq.Context.instance()
-
-        self._sock_req: zmq.Socket = self._ctx.socket(zmq.REQ)
-        self._sock_req.connect(f"tcp://{device_addr}:{device_port}")
+        self._sock_req: Optional[zmq.Socket] = None # Initialized as None
 
         self._state_buffer: Deque[FrankaArmState] = deque()
         self._sub_sock: Optional[zmq.Socket] = None
         self._sub_thread: Optional[threading.Thread] = None
         self._listen_flag: threading.Event = threading.Event()
 
-    def close(self) -> None:
+    def connect(self) -> None:
+        """
+        Connects to the Franka robot's REQ/REP server.
+        If already connected, it will try to close the existing connection first.
+        """
+        if self._sock_req is not None and not self._sock_req.closed:
+            try:
+                self._sock_req.close()
+            except zmq.ZMQError:  # ZMQErrors can occur if socket is already closed
+                pass
+        self._sock_req = self._ctx.socket(zmq.REQ)
+        # TODO: Consider adding timeouts for connect
+        self._sock_req.connect(f"tcp://{self.device_addr}:{self.device_port}")
+
+    def disconnect(self) -> None:
+        """
+        Disconnects from the Franka robot, stops the state listener,
+        and cleans up socket resources.
+        """
         self.stop_state_listener()
-        if not self._sock_req.closed:
-            self._sock_req.close()
+        if self._sock_req and not self._sock_req.closed:
+            try:
+                self._sock_req.close()
+            except zmq.ZMQError:
+                pass  # Socket might already be closed
+        self._sock_req = None # Ensure it's marked as None after closing
+        # Note: self._ctx.term() is usually called globally upon application exit,
+        # not per device instance, to avoid interfering with other ZMQ users.
+
+    def get_status(self) -> ControlMode:
+        """
+        Retrieves the current control mode of the robot.
+        This method effectively wraps `query_state` for semantic clarity
+        as per `RemoteDevice` interface.
+
+        Returns:
+            The current `ControlMode` of the robot.
+
+        Raises:
+            DeviceNotReadyError: If the robot is not connected.
+            CommandError: If the server returns an error or communication fails.
+        """
+        # The check for connection is handled by query_state -> _send/_recv_expect
+        return self.query_state()
 
     def get_state(self) -> FrankaArmState:
-        """Return a single state sample"""
+        """
+        Requests and returns a single, most recent state sample from the robot.
+
+        Returns:
+            A `FrankaArmState` object representing the robot's current state.
+
+        Raises:
+            DeviceNotReadyError: If the robot is not connected.
+            CommandError: If the server returns an error or communication fails.
+        """
+        # Connection check is handled by _send/_recv_expect
         self._send(MsgID.GET_STATE_REQ, b"")
         payload = self._recv_expect(MsgID.GET_STATE_RESP)
         return self._decode_state(payload)
 
     def query_state(self) -> ControlMode:
-        """Return the currently active control mode."""
+        """
+        Queries the robot server for its currently active control mode.
+
+        Returns:
+            The current `ControlMode` reported by the server.
+
+        Raises:
+            DeviceNotReadyError: If the robot is not connected.
+            CommandError: If the server returns an error or communication fails.
+        """
+        # Connection check is handled by _send/_recv_expect
         self._send(MsgID.QUERY_STATE_REQ, b"")
         payload = self._recv_expect(MsgID.QUERY_STATE_RESP)
         return ControlMode(payload[0])
 
     def get_sub_port(self) -> int:
-        """Ask the Server on which TCP port it publishes state updates."""
+        """
+        Asks the robot server on which TCP port it publishes state updates
+        for the ZMQ SUB socket.
+
+        Returns:
+            The port number for the state update publisher.
+
+        Raises:
+            DeviceNotReadyError: If the robot is not connected.
+            CommandError: If the server returns an error, communication fails,
+                          or the payload format is incorrect.
+        """
+        # Connection check is handled by _send/_recv_expect
         self._send(MsgID.GET_SUB_PORT_REQ, b"")
         payload = self._recv_expect(MsgID.GET_SUB_PORT_RESP)
 
@@ -140,14 +212,29 @@ class RemoteFranka(RemoteDevice):
         subscribe_server: bool = False,
     ) -> None:
         """
-        Switch the robot into *mode*.
+        Switches the robot into the specified control `mode`.
 
-        For any mode **other than** :pyattr:`ControlMode.HUMAN_MODE` you *must*
-        provide ``controller_ip`` and ``controller_port`` – these parameters
-        tell the robot where your *SUB* socket lives.  If ``subscribe_server``
-        is *True* we start a background thread that subscribes to
-        state updates.
+        For modes requiring external control (e.g., JOINT_POSITION, CARTESIAN_VELOCITY),
+        `controller_ip` and `controller_port` must be provided to inform the robot
+        server where the external controller's SUB socket is listening.
+
+        If `subscribe_server` is True, this method will also attempt to start
+        the background state listener thread after successfully switching the mode.
+
+        Args:
+            mode: The `ControlMode` to switch the robot into.
+            controller_ip: IP address of the machine running this client's SUB socket
+                           (needed for non-human modes).
+            controller_port: Port number of this client's SUB socket
+                             (needed for non-human modes).
+            subscribe_server: If True, starts the state listener after changing mode.
+
+        Raises:
+            DeviceNotReadyError: If the robot is not connected.
+            ValueError: If required parameters for the control mode are missing or invalid.
+            CommandError: If the server fails to start the control mode or returns an error.
         """
+        # Connection check is handled by _send/_recv_expect
         payload = bytearray([mode.value])
 
         if mode != ControlMode.HUMAN_MODE:
@@ -169,16 +256,33 @@ class RemoteFranka(RemoteDevice):
             self.start_state_listener()
 
     def _send(self, msg_id: MsgID, payload: bytes) -> None:
-        """Serialize *msg_id* + *payload* and send it to the Server."""
+        """
+        Serializes `msg_id` + `payload` and sends it to the server via REQ socket.
+        Internal method.
+
+        Raises:
+            DeviceNotReadyError: If the REQ socket is not connected.
+        """
+        if not self._sock_req or self._sock_req.closed:
+            raise DeviceNotReadyError("Not connected. Call connect() before sending commands.")
         self._sock_req.send(_HEADER_STRUCT.pack(msg_id, len(payload)) + payload)
 
     def _recv_expect(self, expected_id: MsgID) -> bytes:
         """
-        Receive one frame and validate it against *expected* MsgID.
+        Receives one frame from the REQ socket and validates it against `expected_id`.
+        Internal method.
+
+        Returns:
+            The payload of the received message.
 
         Raises:
-            CommandError: On checksum/length mismatch or if the controller reports an error.
+            DeviceNotReadyError: If the REQ socket is not connected.
+            CommandError: On communication errors (frame too short, length mismatch,
+                          server error response, or unexpected message ID).
         """
+        if not self._sock_req or self._sock_req.closed:
+            raise DeviceNotReadyError("Not connected. Call connect() before receiving commands.")
+        # TODO: Consider adding timeout for recv
         raw = self._sock_req.recv()
         if len(raw) < _HEADER_SIZE:
             raise CommandError("Frame too short")
@@ -206,55 +310,108 @@ class RemoteFranka(RemoteDevice):
         port: Optional[int] = None,
         buffer_size: int = 2048,
     ) -> None:
+        """
+        Starts a background thread that subscribes to state updates from the robot server.
+
+        The state updates are stored in an internal buffer (`self._state_buffer`).
+        If `port` is not provided, it will query the server for the SUB port first.
+
+        Args:
+            port: The TCP port on the server publishing state updates. If None,
+                  `get_sub_port()` will be called.
+            buffer_size: Maximum number of state samples to store in the buffer.
+
+        Raises:
+            DeviceNotReadyError: If attempting to query SUB port while not connected.
+            CommandError: If `get_sub_port()` fails.
+            zmq.ZMQError: If socket connection for SUB socket fails.
+        """
         if self._sub_thread and self._sub_thread.is_alive():
+            # TODO: Consider logging that listener is already running
             return
 
+        # If port is not given, we must be connected to query it.
+        # get_sub_port() will raise DeviceNotReadyError if not connected.
         if port is None:
-            port = self.get_sub_port()
+            port = self.get_sub_port() # This can raise DeviceNotReadyError
 
         self._state_buffer = deque(maxlen=buffer_size)
         sock: zmq.Socket = self._ctx.socket(zmq.SUB)
         sock.setsockopt(zmq.SUBSCRIBE, b"")
-        sock.connect(f"tcp://{self._device_addr}:{port}")
+        # Use self.device_addr from the parent class
+        sock.connect(f"tcp://{self.device_addr}:{port}")
         self._sub_sock = sock
 
         self._listen_flag.set()
 
         def _worker() -> None:
-            while self._listen_flag.is_set():
-                raw = sock.recv()
+            # TODO: Add error handling for sock.recv() itself, e.g., if socket closes unexpectedly
+            while self._listen_flag.is_set() and self._sub_sock and not self._sub_sock.closed:
                 try:
+                    raw = self._sub_sock.recv(flags=zmq.NOBLOCK) # Use NOBLOCK to allow thread to exit
                     state = self._decode_state(raw)
                     self._state_buffer.append(state)
-                except CommandError:
+                except zmq.Again: # No message received, try again
+                    time.sleep(0.001) # Small sleep to prevent busy-waiting if NOBLOCK is used
                     continue
+                except zmq.ZMQError: # Socket error (e.g. closed by disconnect)
+                    break # Exit worker thread
+                except CommandError: # Error decoding state
+                    # TODO: Log this error
+                    continue
+            # TODO: Log worker thread exit
 
         self._sub_thread = threading.Thread(target=_worker, daemon=True)
         self._sub_thread.start()
+        # TODO: Log state listener thread started
 
     def stop_state_listener(self) -> None:
-        if not self._sub_thread:
-            return
+        """
+        Stops the background state listener thread and closes the SUB socket.
+        """
+        if not self._sub_thread or not self._sub_thread.is_alive():
+            return # Nothing to do if thread is not running
+
         self._listen_flag.clear()
-        self._sub_thread.join(timeout=1.0)
+        self._sub_thread.join(timeout=1.0) # Wait for the thread to finish
+        if self._sub_thread.is_alive():
+            # TODO: Log a warning if thread doesn't join
+            pass
         self._sub_thread = None
+
         if self._sub_sock and not self._sub_sock.closed:
-            self._sub_sock.close()
-            self._sub_sock = None
+            try:
+                self._sub_sock.close()
+            except zmq.ZMQError:
+                pass # Socket might already be closed
+        self._sub_sock = None
+        # TODO: Log state listener stopped
 
     def get_state_buffer(self) -> List[FrankaArmState]:
-        """Return a *copy* of the internal state buffer."""
+        """
+        Returns a *copy* of the internal state buffer, containing recent robot states
+        collected by the state listener.
+        """
         return list(self._state_buffer)
 
     def latest_state(self) -> Optional[FrankaArmState]:
-        """Return the most recent *RobotState* or *None* if buffer is empty."""
+        """
+        Returns the most recent `FrankaArmState` from the state buffer,
+        or `None` if the buffer is empty.
+        """
         return self._state_buffer[-1] if self._state_buffer else None
 
     @staticmethod
     def _decode_state(buf: bytes) -> FrankaArmState:
-        """Convert the bytes into a :class:`RobotState` instance."""
+        """
+        Converts a raw byte buffer into a `FrankaArmState` instance.
+        Internal static method.
+
+        Raises:
+            CommandError: If the buffer size does not match the expected state size.
+        """
         if len(buf) != _STATE_SIZE:
-            raise CommandError("RobotState payload size mismatch")
+            raise CommandError(f"RobotState payload size mismatch. Expected {_STATE_SIZE}, got {len(buf)}")
         values = _STATE_STRUCT.unpack(buf)
         i = 0
 

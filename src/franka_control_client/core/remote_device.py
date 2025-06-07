@@ -6,6 +6,7 @@ the common interface for all remote devices (robots, cameras, etc.).
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class RemoteDevice(ABC):
@@ -16,10 +17,8 @@ class RemoteDevice(ABC):
     (robots, cameras, sensors, etc.) must implement.
 
     Attributes:
-        device_info: Information about the device
-        connection_config: Configuration for device connection
-        status: Current device status
-        logger: Logger instance for this device
+        device_addr (str): The address of the remote device.
+        device_port (int): The port for communicating with the remote device.
     """
 
     def __init__(self, device_addr: str, device_port: int):
@@ -27,7 +26,28 @@ class RemoteDevice(ABC):
         Initialize the remote device.
 
         Args:
-            connection_config: Configuration for connecting to the device
-            device_id: Optional device identifier
+            device_addr: The address of the remote device.
+            device_port: The port for communicating with the remote device.
         """
+        self.device_addr = device_addr
+        self.device_port = device_port
+
+    @abstractmethod
+    def connect(self) -> None:
+        """Connect to the remote device."""
+        pass
+
+    @abstractmethod
+    def disconnect(self) -> None:
+        """Disconnect from the remote device."""
+        pass
+
+    @abstractmethod
+    def get_status(self) -> Any:
+        """Get the current status of the remote device."""
+        pass
+
+    @abstractmethod
+    def get_state(self) -> Any:
+        """Get the current state of the remote device."""
         pass
