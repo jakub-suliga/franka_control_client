@@ -15,12 +15,18 @@ pip install -r requirements.txt
 To start using the Franka Control Client, you can run the following command:
 
 ```bash
-python main.py
+python examples/leader_follower_robot.py
 ```
 
 ## Contributing
 
-Contributions are welcome! Please follow the standard Git workflow for submitting pull requests.
+Contributions are welcome! Please follow the steps below for submitting pull requests.
+
+1. **Fork** this repository.
+2. **Clone your fork**, create a branch, make your changes in a single commit, and push it.
+3. **Open a Pull Request** against the `main` branch of this repository.
+
+*Note:* Please include **only one commit per Pull Request** to ensure an easy review process. Thank you for your contribution!
 
 ## License
 
