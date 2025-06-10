@@ -16,10 +16,8 @@ class RemoteDevice(ABC):
     (robots, cameras, sensors, etc.) must implement.
 
     Attributes:
-        device_info: Information about the device
-        connection_config: Configuration for device connection
-        status: Current device status
-        logger: Logger instance for this device
+        device_addr (str): The address of the remote device.
+        device_port (int): The port for communicating with the remote device.
     """
 
     def __init__(self, device_addr: str, device_port: int):
@@ -27,7 +25,18 @@ class RemoteDevice(ABC):
         Initialize the remote device.
 
         Args:
-            connection_config: Configuration for connecting to the device
-            device_id: Optional device identifier
+            device_addr (str): The address of the remote device.
+            device_port (int): The port for communicating with the remote device.
         """
+        self._device_addr = device_addr
+        self._device_port = device_port
+
+    @abstractmethod
+    def connect(self) -> None:
+        """Connect to the remote device."""
+        pass
+
+    @abstractmethod
+    def disconnect(self) -> None:
+        """Disconnect from the remote device."""
         pass

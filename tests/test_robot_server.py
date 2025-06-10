@@ -9,7 +9,6 @@ from franka_control_client.core.exception import CommandError
 
 _HEADER_STRUCT = rf_mod._HEADER_STRUCT
 _STATE_STRUCT = rf_mod._STATE_STRUCT
-_STATE_SIZE = rf_mod._STATE_SIZE
 MsgID = rf_mod.MsgID
 ControlMode = rf_mod.ControlMode
 RemoteFranka = rf_mod.RemoteFranka
@@ -61,7 +60,6 @@ def _instantiate_rf(fake_socket: _FakeSocket) -> RemoteFranka:
 
 
 class TestRemoteFranka(unittest.TestCase):
-
     def test_recv_expect_success(self) -> None:
         frame = _make_frame(MsgID.GET_STATE_RESP, b"")
         fake_sock = _FakeSocket([frame])
