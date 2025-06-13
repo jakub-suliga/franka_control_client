@@ -7,13 +7,12 @@ from typing import Deque, Final, List, Optional, Tuple
 import socket
 import struct
 import threading
-import time
 
 import zmq
 
 from ...core.remote_device import RemoteDevice
-from ...core.exception import CommandError
-
+from ...core.exception import CommandError, DeviceNotReadyError
+from ...core.message import MsgID
 
 _HEADER_STRUCT: Final = struct.Struct("!BHx")  # uint8 id | uint16 len | pad
 _HEADER_SIZE: Final = _HEADER_STRUCT.size
@@ -25,22 +24,6 @@ _STATE_STRUCT: Final = struct.Struct(
     "6d6d"  # O_F_ext_hat_K, K_F_ext_hat_K               –  96 B
 )
 _STATE_SIZE: Final = _STATE_STRUCT.size
-
-
-class MsgID(IntEnum):
-    """Message identifiers"""
-
-    GET_STATE_REQ = 0x01
-    QUERY_STATE_REQ = 0x02
-    START_CONTROL_REQ = 0x03
-    GET_SUB_PORT_REQ = 0x04
-
-    GET_STATE_RESP = 0x51
-    QUERY_STATE_RESP = 0x52
-    START_CONTROL_RESP = 0x53
-    GET_SUB_PORT_RESP = 0x54
-
-    ERROR = 0xFF
 
 
 class ControlMode(IntEnum):
@@ -88,25 +71,40 @@ class RemoteFranka(RemoteDevice):
         Initialize the RemoteFranka instance.
 
         Args:
-            device_addr (str): Address of the Franka robot.
-            device_port (int): Port for communication with the Franka robot.
+            device_addr (str): The IP address of the Franka robot.
+            device_port (int): The port number for communication with the Franka robot.
         """
         super().__init__(device_addr, device_port)
-        self._device_addr: str = device_addr
         self._ctx: zmq.Context = zmq.Context.instance()
 
-        self._sock_req: zmq.Socket = self._ctx.socket(zmq.REQ)
-        self._sock_req.connect(f"tcp://{device_addr}:{device_port}")
+        self._sock_req: Optional[zmq.Socket] = None
 
         self._state_buffer: Deque[FrankaArmState] = deque()
         self._sub_sock: Optional[zmq.Socket] = None
         self._sub_thread: Optional[threading.Thread] = None
         self._listen_flag: threading.Event = threading.Event()
 
-    def close(self) -> None:
-        self.stop_state_listener()
-        if not self._sock_req.closed:
-            self._sock_req.close()
+    def connect(self) -> None:
+        """
+        Connects to the Franka robot's server.
+        """
+        if self._sock_req is not None and not self._sock_req.closed:
+            try:
+                self._sock_req.close()
+            except zmq.ZMQError:
+                pass
+        self._sock_req = self._ctx.socket(zmq.REQ)
+        if self._sock_req is None:
+            raise ConnectionError
+        self._sock_req.connect(f"tcp://{self._device_addr}:{self._device_port}")
+
+    def disconnect(self) -> None:
+        if self._sock_req and not self._sock_req.closed:
+            try:
+                self._sock_req.close()
+            except zmq.ZMQError:
+                pass
+        self._sock_req = None
 
     def get_state(self) -> FrankaArmState:
         """Return a single state sample"""
@@ -170,6 +168,8 @@ class RemoteFranka(RemoteDevice):
 
     def _send(self, msg_id: MsgID, payload: bytes) -> None:
         """Serialize *msg_id* + *payload* and send it to the Server."""
+        if self._sock_req is None:
+            raise ConnectionError
         self._sock_req.send(_HEADER_STRUCT.pack(msg_id, len(payload)) + payload)
 
     def _recv_expect(self, expected_id: MsgID) -> bytes:
@@ -179,6 +179,8 @@ class RemoteFranka(RemoteDevice):
         Raises:
             CommandError: On checksum/length mismatch or if the controller reports an error.
         """
+        if self._sock_req is None:
+            raise ConnectionError
         raw = self._sock_req.recv()
         if len(raw) < _HEADER_SIZE:
             raise CommandError("Frame too short")
@@ -206,6 +208,8 @@ class RemoteFranka(RemoteDevice):
         port: Optional[int] = None,
         buffer_size: int = 2048,
     ) -> None:
+        if self._sock_req is None:
+            raise ConnectionError
         if self._sub_thread and self._sub_thread.is_alive():
             return
 
@@ -226,6 +230,8 @@ class RemoteFranka(RemoteDevice):
                 try:
                     state = self._decode_state(raw)
                     self._state_buffer.append(state)
+                except zmq.ZMQError:
+                    break
                 except CommandError:
                     continue
 
@@ -233,13 +239,16 @@ class RemoteFranka(RemoteDevice):
         self._sub_thread.start()
 
     def stop_state_listener(self) -> None:
-        if not self._sub_thread:
+        if not self._sub_thread or not self._sub_thread.is_alive():
             return
         self._listen_flag.clear()
         self._sub_thread.join(timeout=1.0)
         self._sub_thread = None
         if self._sub_sock and not self._sub_sock.closed:
-            self._sub_sock.close()
+            try:
+                self._sub_sock.close()
+            except zmq.ZMQError:
+                pass
             self._sub_sock = None
 
     def get_state_buffer(self) -> List[FrankaArmState]:
