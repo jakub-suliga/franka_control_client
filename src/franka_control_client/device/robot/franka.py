@@ -112,7 +112,7 @@ class RemoteFranka(RemoteDevice):
         payload = self._recv_expect(MsgID.GET_STATE_RESP)
         return self._decode_state(payload)
 
-    def query_state(self) -> ControlMode:
+    def get_control_mode(self) -> ControlMode:
         """Return the currently active control mode."""
         self._send(MsgID.QUERY_STATE_REQ, b"")
         payload = self._recv_expect(MsgID.QUERY_STATE_RESP)
@@ -218,7 +218,7 @@ class RemoteFranka(RemoteDevice):
 
         self._state_buffer = deque(maxlen=buffer_size)
         sock: zmq.Socket = self._ctx.socket(zmq.SUB)
-        sock.setsockopt(zmq.SUBSCRIBE, b"")
+        sock.setsockopt(zmq.SUBSCRIBE, b"franka")
         sock.connect(f"tcp://{self._device_addr}:{port}")
         self._sub_sock = sock
 
@@ -226,9 +226,9 @@ class RemoteFranka(RemoteDevice):
 
         def _worker() -> None:
             while self._listen_flag.is_set():
-                raw = sock.recv()
+                topic, payload = sock.recv_multipart()
                 try:
-                    state = self._decode_state(raw)
+                    state = self._decode_state(payload)
                     self._state_buffer.append(state)
                 except zmq.ZMQError:
                     break
