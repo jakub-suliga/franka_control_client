@@ -129,7 +129,7 @@ class TestRemoteFrankaAPI(unittest.TestCase):
         fake_sock = _FakeSocket([resp_frame])
         rf = _instantiate_rf(fake_sock)
 
-        mode = rf.query_state()
+        mode = rf.get_control_mode()
         self.assertEqual(mode, ControlMode.JOINT_POSITION)
 
     def test_start_control_requires_ip_port(self) -> None:
