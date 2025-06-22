@@ -3,11 +3,10 @@ import struct
 import unittest
 from collections import deque
 from typing import Deque, List, Optional
-
-from franka_control_client.device.robot import franka as rf_mod
+from franka_control_client.device.franka_robot import franka_arm as rf_mod
 from franka_control_client.core.exception import CommandError
 
-_HEADER_STRUCT = rf_mod._HEADER_STRUCT
+_HEADER_STRUCT = struct.Struct("!BHx")  # uint8 id | uint16 len | pad
 _STATE_STRUCT = rf_mod._STATE_STRUCT
 MsgID = rf_mod.MsgID
 ControlMode = rf_mod.ControlMode
@@ -41,11 +40,6 @@ class _FakeSocket:
         self.closed = True
 
 
-def _make_frame(msg_id: int, payload: bytes = b"") -> bytes:
-    """Return header+payload frame complying with the custom protocol."""
-    return _HEADER_STRUCT.pack(msg_id, len(payload)) + payload
-
-
 def _instantiate_rf(fake_socket: _FakeSocket) -> RemoteFranka:
     """Instantiate *RemoteFranka* without running its real __init__."""
     rf: RemoteFranka = RemoteFranka.__new__(RemoteFranka)
@@ -57,6 +51,11 @@ def _instantiate_rf(fake_socket: _FakeSocket) -> RemoteFranka:
     rf._sub_thread = None  # type: ignore[attr-defined]
     rf._listen_flag = None  # type: ignore[attr-defined]
     return rf
+
+
+def _make_frame(msg_id: int, payload: bytes = b"") -> bytes:
+    """Return header+payload frame complying with the custom protocol."""
+    return _HEADER_STRUCT.pack(msg_id, len(payload)) + payload
 
 
 class TestRemoteFranka(unittest.TestCase):
