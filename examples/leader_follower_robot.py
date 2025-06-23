@@ -1,15 +1,12 @@
-import time
 import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from franka_control_client.device.robot.franka import (
+from franka_control_client.device.franka_robot.franka_arm import (
     RemoteFranka,
     ControlMode,
 )
-from franka_control_client.core.exception import CommandError, DeviceNotReadyError
-
 
 LEADER_ROBOT_IP = "127.0.0.1"
 LEADER_ROBOT_PORT = 5555
