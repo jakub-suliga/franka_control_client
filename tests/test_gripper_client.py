@@ -54,7 +54,7 @@ def _make_frame(msg_id: int, payload: bytes = b"") -> bytes:
 
 class TestRemoteGripper(unittest.TestCase):
     def _dummy_state_bytes(self) -> bytes:
-        return _STATE_STRUCT.pack(123456, 0.05, 0.1, True, 42.0)
+        return _STATE_STRUCT.pack(123456, 0.05, 0.1, True, 42)
 
     def test_get_state_decodes_payload(self) -> None:
         state_bytes = self._dummy_state_bytes()

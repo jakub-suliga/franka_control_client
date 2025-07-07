@@ -15,11 +15,11 @@ Messages are published under the topic `franka_gripper`.
 |      4 | `width`        | `float64`  | gripper opening \[m] |
 |     12 | `max_width`    | `float64`  | maximum width \[m]   |
 |     20 | `grasped`      | `bool`     | whether object held  |
-|     21 | `temperature`  | `float64`  | finger temperature   |
+|     21 | `temperature`  | `uint16`  | finger temperature   |
 
-Total size: **29 B**
+Total size: **23 B**
 
-Python struct: `!I d d ? d`
+Python struct: `!I d d ? H`
 
 ---
 

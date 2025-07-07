@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import socket
+import struct
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Optional, Tuple
-import socket
-import struct
 
-from ...core.remote_device import RemoteDevice, State
 from ...core.exception import CommandError
 from ...core.message import MsgID
-
+from ...core.remote_device import RemoteDevice, State
 
 _STATE_STRUCT: Final = struct.Struct(
     "!I"  # timestamp [ms] – 4 B

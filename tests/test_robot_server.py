@@ -3,8 +3,9 @@ import struct
 import unittest
 from collections import deque
 from typing import Deque, List, Optional
-from franka_control_client.device.franka_robot import franka_arm as rf_mod
+
 from franka_control_client.core.exception import CommandError
+from franka_control_client.device.franka_robot import franka_arm as rf_mod
 
 _HEADER_STRUCT = struct.Struct("!BHx")  # uint8 id | uint16 len | pad
 _STATE_STRUCT = rf_mod._STATE_STRUCT
@@ -86,7 +87,6 @@ class TestRemoteFranka(unittest.TestCase):
 
 
 class TestRemoteFrankaAPI(unittest.TestCase):
-
     @staticmethod
     def _dummy_state_bytes() -> bytes:
         values = [
@@ -99,9 +99,7 @@ class TestRemoteFrankaAPI(unittest.TestCase):
             *([0.6] * 7),  # dq_d
             *([0.7] * 7),  # tau_ext_hat_filtered
             *([0.8] * 6),  # O_F_ext_hat_K
-        ] + [
-            0.9
-        ] * 6  # K_F_ext_hat_K
+        ] + [0.9] * 6  # K_F_ext_hat_K
         return _STATE_STRUCT.pack(*values)
 
     def test_get_state_decodes_payload_and_sends_request(
