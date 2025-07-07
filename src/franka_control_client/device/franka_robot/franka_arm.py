@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import socket
+import struct
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Optional, Tuple
-import socket
-import struct
 
-from ...core.remote_device import RemoteDevice, State
 from ...core.exception import CommandError
 from ...core.message import MsgID
-
+from ...core.remote_device import RemoteDevice, State
 
 _STATE_STRUCT: Final = struct.Struct(
     "!I"  # timestamp [ms] – 4 B
@@ -76,8 +75,8 @@ class RemoteFranka(RemoteDevice):
 
     def get_control_mode(self) -> ControlMode:
         """Return the currently active control mode."""
-        self._send(MsgID.QUERY_STATE_REQ, b"")
-        payload = self._recv_expect(MsgID.QUERY_STATE_RESP)
+        self._send(MsgID.GET_CONTROL_MODE_REQ, b"")
+        payload = self._recv_expect(MsgID.GET_CONTROL_MODE_RESP)
         return ControlMode(payload[0])
 
     def start_control(
@@ -110,8 +109,8 @@ class RemoteFranka(RemoteDevice):
 
             payload += struct.pack("!H", controller_port)
 
-        self._send(MsgID.START_CONTROL_REQ, payload)
-        status = self._recv_expect(MsgID.START_CONTROL_RESP)[0]
+        self._send(MsgID.SET_CONTROL_MODE_REQ, payload)
+        status = self._recv_expect(MsgID.SET_CONTROL_MODE_RESP)[0]
         if status != 0:
             raise CommandError(f"START_CONTROL failed (status={status})")
         if subscribe_server:
