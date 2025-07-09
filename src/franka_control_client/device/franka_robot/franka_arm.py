@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import socket
+import struct
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Final, Optional, Tuple
-import socket
-import struct
 
-from ...core.remote_device import RemoteDevice, State
 from ...core.exception import CommandError
 from ...core.message import MsgID
-
+from ...core.remote_device import RemoteDevice, State
 
 _STATE_STRUCT: Final = struct.Struct(
     "!I"  # timestamp [ms] – 4 B
@@ -67,6 +66,7 @@ class RemoteFranka(RemoteDevice):
             device_port (int): The port number for communication with the Franka robot.
         """
         super().__init__(device_addr, device_port)
+        self.default_pose: FrankaArmState = self.get_state()
 
     def get_state(self) -> FrankaArmState:
         """Return a single state sample"""
@@ -80,7 +80,7 @@ class RemoteFranka(RemoteDevice):
         payload = self._recv_expect(MsgID.QUERY_STATE_RESP)
         return ControlMode(payload[0])
 
-    def start_control(
+    def set_control_mode(
         self,
         mode: ControlMode,
         *,
@@ -129,6 +129,12 @@ class RemoteFranka(RemoteDevice):
             buffer_size=buffer_size,
             topic=topic,
         )
+
+    def set_default_pose(self, default_pose: FrankaArmState):
+        self.default_pose = default_pose
+
+    def move_to_default_pose(self):
+        pass
 
     @staticmethod
     def _decode_state(buf: bytes) -> FrankaArmState:
