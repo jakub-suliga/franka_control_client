@@ -3,8 +3,9 @@ import struct
 import unittest
 from collections import deque
 from typing import Deque, List, Optional
-from franka_control_client.device.franka_robot import franka_arm as rf_mod
+
 from franka_control_client.core.exception import CommandError
+from franka_control_client.device.franka_robot import franka_arm as rf_mod
 
 _HEADER_STRUCT = struct.Struct("!BHx")  # uint8 id | uint16 len | pad
 _STATE_STRUCT = rf_mod._STATE_STRUCT
@@ -86,7 +87,6 @@ class TestRemoteFranka(unittest.TestCase):
 
 
 class TestRemoteFrankaAPI(unittest.TestCase):
-
     @staticmethod
     def _dummy_state_bytes() -> bytes:
         values = [
@@ -99,9 +99,7 @@ class TestRemoteFrankaAPI(unittest.TestCase):
             *([0.6] * 7),  # dq_d
             *([0.7] * 7),  # tau_ext_hat_filtered
             *([0.8] * 6),  # O_F_ext_hat_K
-        ] + [
-            0.9
-        ] * 6  # K_F_ext_hat_K
+        ] + [0.9] * 6  # K_F_ext_hat_K
         return _STATE_STRUCT.pack(*values)
 
     def test_get_state_decodes_payload_and_sends_request(
@@ -123,7 +121,7 @@ class TestRemoteFrankaAPI(unittest.TestCase):
 
     def test_query_state_returns_enum(self) -> None:
         resp_frame = _make_frame(
-            MsgID.QUERY_STATE_RESP, bytes([ControlMode.JOINT_POSITION])
+            MsgID.GET_CONTROL_MODE_RESP, bytes([ControlMode.JOINT_POSITION])
         )
         fake_sock = _FakeSocket([resp_frame])
         rf = _instantiate_rf(fake_sock)
@@ -132,7 +130,7 @@ class TestRemoteFrankaAPI(unittest.TestCase):
         self.assertEqual(mode, ControlMode.JOINT_POSITION)
 
     def test_start_control_requires_ip_port(self) -> None:
-        fake_sock = _FakeSocket([_make_frame(MsgID.START_CONTROL_RESP, b"\x00")])
+        fake_sock = _FakeSocket([_make_frame(MsgID.SET_CONTROL_MODE_RESP, b"\x00")])
         rf = _instantiate_rf(fake_sock)
 
         with self.assertRaises(ValueError):
@@ -144,7 +142,7 @@ class TestRemoteFrankaAPI(unittest.TestCase):
         payload = bytearray([ControlMode.JOINT_POSITION])
         payload += socket.inet_aton(ip)
         payload += struct.pack("!H", port)
-        fake_resp = _make_frame(MsgID.START_CONTROL_RESP, b"\x00")
+        fake_resp = _make_frame(MsgID.SET_CONTROL_MODE_RESP, b"\x00")
         fake_sock = _FakeSocket([fake_resp])
         rf = _instantiate_rf(fake_sock)
 
@@ -153,7 +151,7 @@ class TestRemoteFrankaAPI(unittest.TestCase):
         )
 
         self.assertEqual(len(fake_sock.sent), 1)
-        expected_header = _HEADER_STRUCT.pack(MsgID.START_CONTROL_REQ, len(payload))
+        expected_header = _HEADER_STRUCT.pack(MsgID.SET_CONTROL_MODE_REQ, len(payload))
         self.assertEqual(fake_sock.sent[0], expected_header + payload)
 
 
