@@ -5,16 +5,17 @@ This module contains the abstract base class RemoteDevice that defines
 the common interface for all remote devices (robots, cameras, etc.).
 """
 
+import struct
+import threading
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
-import struct
-import threading
 from typing import Deque, Final, List, Optional
 
 import zmq
 
 from franka_control_client.core.exception import CommandError
+
 from .message import MsgID
 
 

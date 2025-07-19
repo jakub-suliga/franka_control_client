@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from typing import Final
-import struct
 
-from ...core.remote_device import RemoteDevice, State
 from ...core.exception import CommandError
 from ...core.message import MsgID
+from ...core.remote_device import RemoteDevice, State
 
 _STATE_STRUCT: Final = struct.Struct(
-    "!Idd?d"
+    "!Idd?H"
 )  # timestamp, width, max_width, grasped, temperature
 _STATE_SIZE: Final = _STATE_STRUCT.size
 
@@ -21,7 +21,7 @@ class GripperState(State):
     width: float
     max_width: float
     grasped: bool
-    temperature: float
+    temperature: int
 
 
 class RemoteGripper(RemoteDevice):
